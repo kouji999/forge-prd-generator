@@ -255,12 +255,14 @@ function describeHttpError(providerName: string, status: number, body: string): 
 /**
  * Stream chat completion from any OpenAI-compatible provider.
  *
- * Sends `reasoning_effort: 'low'`: free-tier reasoning models (GLM-5.3, etc.)
- * default to max-effort thinking — measured 200-215s of pure reasoning before
- * the first content token, which blows the server deadline. 'low' cuts that to
- * ~120s so a section finishes in ~160s. Endpoints that don't support the param
- * are retried once WITHOUT it (fail-open), so non-supporting providers keep
- * working.
+ * Sends the canonical GLM effort shape `thinking:{type:'enabled'}` +
+ * `reasoning_effort:'low'`: free-tier reasoning models default to max-effort
+ * thinking — measured 200-290s of pure reasoning before the first content
+ * token (and on GLM's OpenAI-compat endpoint a bare reasoning_effort is a
+ * silent no-op — the thinking object is what activates it). With the full
+ * shape the structure prompt completes in ~205s with valid JSON. Endpoints
+ * that 400 on either param are retried once WITHOUT them (fail-open), so
+ * non-supporting providers keep working.
  *
  * max_tokens must stay HIGH: on reasoning models the thinking tokens count
  * against the same max_tokens budget — a low cap truncates the section
@@ -289,7 +291,7 @@ export async function streamFromProvider(params: {
   let res = await fetch(url, {
     method: 'POST',
     headers,
-    body: JSON.stringify({ ...baseBody, reasoning_effort: 'low' }),
+    body: JSON.stringify({ ...baseBody, thinking: { type: 'enabled' }, reasoning_effort: 'low' }),
     signal,
   });
 
@@ -300,7 +302,7 @@ export async function streamFromProvider(params: {
     // error) is retried once with the base body so non-supporting endpoints work.
     if (
       res.status === 400 &&
-      /reasoning_effort|unsupported parameter|unknown parameter|unexpected field|extra inputs|not permitted/i.test(errText)
+      /reasoning_effort|thinking|unsupported parameter|unknown parameter|unexpected field|unrecognized|extra inputs|not permitted/i.test(errText)
     ) {
       res = await fetch(url, {
         method: 'POST',
@@ -383,11 +385,11 @@ export async function* parseTokenStream(
  * Stream from AgentRouter using Anthropic SDK (Messages API).
  * AgentRouter's WAF requires Claude Code wire-image headers.
  *
- * Sends `reasoning_effort: 'low'`: free-tier reasoning models (GLM-5.3, etc.)
- * default to max-effort thinking — measured 200-215s of pure reasoning before
- * the first content token, which blows the server deadline. 'low' cuts that to
- * ~120s so a section finishes in ~160s. z.ai's Anthropic route honors it;
- * strict Anthropic proxies reject it and get the fail-open retry without it.
+ * Sends the canonical GLM effort shape `thinking:{type:'enabled'}` +
+ * `reasoning_effort:'low'` (z.ai's Anthropic route honors both; a bare
+ * reasoning_effort is a silent no-op on the OpenAI-compat route). Strict
+ * Anthropic proxies reject the shape ("budget_tokens: Field required",
+ * "Unrecognized request argument") and get the fail-open retry WITHOUT it.
  *
  * max_tokens must stay HIGH: on reasoning models the thinking tokens count
  * against the same max_tokens budget — a low cap truncates the section
@@ -429,7 +431,7 @@ export async function streamFromAnthropic(params: {
   let res = await fetch(url, {
     method: 'POST',
     headers,
-    body: JSON.stringify({ ...baseBody, reasoning_effort: 'low' }),
+    body: JSON.stringify({ ...baseBody, thinking: { type: 'enabled' }, reasoning_effort: 'low' }),
     signal,
   });
 
@@ -440,7 +442,7 @@ export async function streamFromAnthropic(params: {
     // error) is retried once with the base body so strict proxies keep working.
     if (
       res.status === 400 &&
-      /reasoning_effort|unsupported parameter|unknown parameter|unexpected field|extra inputs|not permitted/i.test(errText)
+      /reasoning_effort|thinking|unsupported parameter|unknown parameter|unexpected field|unrecognized|extra inputs|not permitted/i.test(errText)
     ) {
       res = await fetch(url, {
         method: 'POST',
