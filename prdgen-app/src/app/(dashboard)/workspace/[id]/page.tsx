@@ -394,10 +394,14 @@ export default function WorkspacePage() {
       if (v?.trim()) contentAcc[s.key] = v;
     });
 
-    // Request a single section. Keeps its OWN currentSection + AbortController.
-    // `prevSnapshot` is captured before the call so it carries all sections
-    // generated so far. Errors propagate to the caller (counted + retried).
-    async function requestSection(key: PRDSectionKey, prevSnapshot: Partial<PRDContent>) {
+    // Request a GROUP of sections in one call. Reasoning engines spend most of
+    // a request's time thinking before writing — one section per request paid
+    // that thinking cost 17 times and mostly blew the server deadline. A group
+    // of 3 shares one thinking phase. Sections that finish keep their content
+    // even if the request dies mid-way.
+    async function requestGroup(keys: PRDSectionKey[], prevSnapshot: Partial<PRDContent>) {
+      const groupSet = new Set(keys);
+      const completed = new Set<PRDSectionKey>();
       let localSection: PRDSectionKey | null = null;
       const ctrl = new AbortController();
       const timer = setTimeout(() => ctrl.abort(), 290_000);
@@ -409,7 +413,7 @@ export default function WorkspacePage() {
             model_id: activeModel,
             idea,
             structure,
-            sections: [key],
+            sections: keys,
             previous: prevSnapshot,
             ...(engineBody ?? {}),
           }),
@@ -422,7 +426,7 @@ export default function WorkspacePage() {
             case 'section_start':
               // Defense in depth: a model that spills into another section must
               // not write into a sibling request's key. Ignore foreign sections.
-              if (event.section !== key) break;
+              if (!groupSet.has(event.section)) break;
               localSection = event.section;
               setPrdSection(event.section);
               setThinking(false);
@@ -431,9 +435,9 @@ export default function WorkspacePage() {
               break;
             case 'token': {
               setThinking(false);
-              // Fallback to the requested key (never a shared mutable) so
-              // parallel requests never cross-write each other's section.
-              const k = localSection ?? key;
+              // Fallback to the first requested key (never a shared mutable) so
+              // requests never cross-write each other's section.
+              const k = localSection ?? keys[0];
               contentAcc[k] = (contentAcc[k] ?? '') + event.content;
               setPrdContent((prev) => ({
                 ...prev,
@@ -445,7 +449,8 @@ export default function WorkspacePage() {
               setThinking(true);
               break;
             case 'section_end':
-              if (event.section !== key) break;
+              if (!groupSet.has(event.section)) break;
+              completed.add(event.section);
               localSection = null;
               break;
             case 'error':
@@ -457,10 +462,14 @@ export default function WorkspacePage() {
           }
         }
       } catch (err) {
-        // A section that died mid-stream holds half-written garbage. Clear it so
-        // the resume check (non-empty = done) re-requests it next round.
-        contentAcc[key] = '';
-        setPrdContent((prev) => ({ ...prev, [key]: '' }));
+        // Sections that never finished hold half-written garbage. Clear only
+        // those; completed ones keep their content for the resume check.
+        for (const k of keys) {
+          if (!completed.has(k)) {
+            contentAcc[k] = '';
+            setPrdContent((prev) => ({ ...prev, [k]: '' }));
+          }
+        }
         throw err;
       } finally {
         clearTimeout(timer);
@@ -469,8 +478,10 @@ export default function WorkspacePage() {
 
     // Auto-continue: repeat the pass over still-missing sections for up to
     // MAX_ROUNDS so the user doesn't have to re-click Generate. Sections are
-    // generated SEQUENTIALLY in canonical PRD_SECTIONS order — free-tier
-    // providers 5xx under concurrent load, and the user wants top-to-bottom fill.
+    // generated sequentially in canonical PRD_SECTIONS order, in groups of 3
+    // per request — free-tier providers 5xx under concurrent load, the user
+    // wants top-to-bottom fill, and reasoning engines pay their thinking cost
+    // once per request instead of once per section.
     const MAX_ROUNDS = 3;
     const GAP_MS = 400;
     const failed: PRDSectionKey[] = [];
@@ -501,19 +512,23 @@ export default function WorkspacePage() {
         }
 
         // Sections still needing content this round, in canonical order.
+        // Generated in sequential GROUPS of 3 — one request per group shares a
+        // single reasoning phase (the dominant cost on reasoning engines).
+        const GROUP_SIZE = 3;
         const todo = missingKeys();
-        for (let i = 0; i < todo.length; i++) {
-          const key = todo[i];
-          // Resume: another path may have filled it; skip if already present.
-          if ((contentAcc[key] ?? '').trim().length > 0) continue;
+        for (let g = 0; g < todo.length; g += GROUP_SIZE) {
+          const group = todo.slice(g, g + GROUP_SIZE);
+          // Resume: another path may have filled them; skip fully-filled groups.
+          if (group.every((k) => (contentAcc[k] ?? '').trim().length > 0)) continue;
 
           // Sequential → `previous` naturally carries ALL prior sections.
           const prevSnapshot = { ...contentAcc };
           try {
-            await requestSection(key, prevSnapshot);
+            await requestGroup(group, prevSnapshot);
             consecutiveSlow = 0;
           } catch (err) {
-            failed.push(key);
+            // Only keys still empty count as failed for this round.
+            failed.push(...group.filter((k) => (contentAcc[k] ?? '').trim().length === 0));
             const reason = err instanceof Error ? err.message : '';
             if (reason && !failReason) failReason = reason;
             // Only timeouts trip the breaker — 429/530/provider errors retry as before.
@@ -521,24 +536,24 @@ export default function WorkspacePage() {
             else consecutiveSlow = 0;
           }
 
-          // 3 consecutive timeouts: the model is too slow to ever finish. Stop
-          // both loops so the user can switch to a faster model/engine.
+          // 3 consecutive timed-out batches: the model is too slow to ever
+          // finish. Stop both loops so the user can switch to a faster engine.
           if (consecutiveSlow >= 3) {
             fatalSlow = true;
             if (!failReason) {
-              failReason = 'Model terlalu lambat — 3 section timeout berturut-turut. Ganti model/engine yang lebih cepat, lalu klik Generate PRD lagi untuk lanjut sisanya.';
+              failReason = 'Model terlalu lambat — 3 batch timeout berturut-turut. Ganti model/engine yang lebih cepat, lalu klik Generate PRD lagi untuk lanjut sisanya.';
             }
             break;
           }
 
-          // Advance progress after each section.
+          // Advance progress after each group.
           const filled = PRD_SECTIONS.filter(
             (s) => (contentAcc[s.key] ?? '').trim().length > 0
           ).length;
           setPrdProgress(Math.round((filled / PRD_SECTIONS.length) * 100));
 
           // Gentle spacing between requests (not after the last one).
-          if (i < todo.length - 1) await new Promise((r) => setTimeout(r, GAP_MS));
+          if (g + GROUP_SIZE < todo.length) await new Promise((r) => setTimeout(r, GAP_MS));
         }
 
         // No-progress guard: from round 2 on, if a full round didn't reduce the
