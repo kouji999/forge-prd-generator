@@ -11,32 +11,32 @@ export const PRD_SECTION_DEFS: { key: PRDSectionKey; title: string; body: string
   {
     key: 'executive_summary',
     title: 'Executive Summary',
-    body: `Overview of the product, purpose, target market, and key value proposition. Include the business/monetization model at a high level (free vs paid, how it makes or saves money) and 2-3 indicative success targets. Note the core competitive edge.`,
+    body: `Overview of the product, purpose, target market, and key value proposition. Include the business/monetization model at a high level (free vs paid, how it makes or saves money) and 2-3 indicative success targets WITH concrete numbers (label "(indikatif)"). Note the core competitive edge and why this product wins against the status quo. 2-3 paragraf naratif, bukan bullet pendek.`,
   },
   {
     key: 'problem_statement',
     title: 'Problem Statement',
-    body: `The core problem, who experiences it, current pain points, and why now. Quantify the pain where possible (labeled indikatif). Distinguish the primary problem from secondary ones.`,
+    body: `The core problem, who experiences it, current pain points, and why now. Quantify the pain where possible (labeled indikatif). Distinguish the primary problem from secondary ones. Jelaskan juga konsekuensi BILA problem tidak diselesaikan (cost of inaction) dan bagaimana solusi existing saat ini gagal.`,
   },
   {
     key: 'goals_metrics',
     title: 'Goals & Success Metrics',
-    body: `Specific, measurable goals with stable IDs (G-01…), KPIs, and success criteria. For EACH KPI, state HOW it is measured (event tracking, analytics tooling, instrumentation) — a metric with no measurement plan is incomplete. Separate business goals, product goals, and technical goals.`,
+    body: `Specific, measurable goals with stable IDs (G-01…), KPIs, and success criteria. For EACH KPI, state HOW it is measured (event tracking, analytics tooling, instrumentation) — a metric with no measurement plan is incomplete. Separate business goals, product goals, and technical goals. Tabel kolom: | ID | Goal | KPI | Target | Measurement |.`,
   },
   {
     key: 'user_personas',
     title: 'User Personas',
-    body: `Detailed personas with demographics, behaviors, needs, pain points, and technical sophistication. Include at least one secondary/edge persona (e.g. admin, moderator, first-time vs power user).`,
+    body: `MINIMAL 3 persona primer + 1 persona sekunder/edge (admin, moderator, first-time vs power user). Per persona: demografi, konteks penggunaan, behavior, kebutuhan inti, pain points, tingkat technical sophistication, dan satu kutipan persona (quotation) yang mewakili sudut pandangnya. Sub-heading per persona — bukan satu paragraf gabungan.`,
   },
   {
     key: 'glossary',
     title: 'Glossary',
-    body: `Defined terms, acronyms, domain concepts, and entity states used across this PRD. Include at least 6 entries. Define any state-machine values (e.g. DRAFT vs CONFIRMED).`,
+    body: `Defined terms, acronyms, domain concepts, and entity states used across this PRD. MINIMAL 8 entri dalam pipe-table | Istilah | Definisi |. Define any state-machine values (e.g. DRAFT vs CONFIRMED). Istilah yang muncul di section lain tapi tidak ada di glossary = defect.`,
   },
   {
     key: 'feature_list',
     title: 'Feature List & Prioritization',
-    body: `Prioritized feature table using MoSCoW (Must/Should/Could/Won't) with a one-line justification per feature tying it to value/effort/risk. Explicitly list what is OUT of scope (Won't-have) so scope is unambiguous. Include onboarding and account/notification features where relevant.`,
+    body: `Prioritized feature table (MINIMAL 8 baris fitur) menggunakan MoSCoW (Must/Should/Could/Won't) dengan kolom | # | Fitur | MoSCoW | Justifikasi (value/effort/risk) | Estimasi (person-day, indikatif) | — satu justifikasi eksplisit per fitur yang menautkannya ke nilai/effort/risk. WAJIB ada sub-bagian "Non-Goals (Won't-have)" yang menyebut eksplisit apa yang TIDAK dibangun dan mengapa (proteksi timeline). Include onboarding and account/notification features where relevant.`,
   },
   {
     key: 'user_stories',
@@ -66,7 +66,7 @@ export const PRD_SECTION_DEFS: { key: PRDSectionKey; title: string; body: string
   {
     key: 'api_specification',
     title: 'API Specification',
-    body: `Key endpoints with method, path, request/response shape, auth, and error codes. Include rate limiting and idempotency for sensitive operations. Note webhook/callback contracts for any third-party integrations.`,
+    body: `MINIMAL 6 endpoint. Untuk tiap endpoint: method, path, auth requirement, request body (contoh JSON), response sukses (contoh JSON), dan error codes. WAJIB definisikan SATU error envelope standar (mis. { error: { code, message, details? } }) dan pakai konsisten di semua endpoint. Include rate limiting and idempotency for sensitive operations. Note webhook/callback contracts for any third-party integrations. Rujuk FR ID yang dilayani tiap endpoint.`,
   },
   {
     key: 'risk_assessment',
@@ -81,12 +81,12 @@ export const PRD_SECTION_DEFS: { key: PRDSectionKey; title: string; body: string
   {
     key: 'diagrams',
     title: 'Diagrams & Flows',
-    body: `Mermaid diagrams chosen by context: flowchart for process flows, sequenceDiagram for client-server API interactions, erDiagram for data entities, stateDiagram-v2 for entity lifecycles. Include at least one; add a one-sentence caption before each.`,
+    body: `MINIMAL 2 diagram dari TIPE BERBEDA, dipilih sesuai konteks: flowchart untuk process flow, sequenceDiagram untuk interaksi client-server/API, erDiagram untuk entitas data, stateDiagram-v2 untuk lifecycle entitas. Satu kalimat caption sebelum tiap diagram. Semua diagram dalam mermaid code fence yang valid (syntax salah = diagram tidak render = defect).`,
   },
   {
     key: 'roadmap',
     title: 'Roadmap',
-    body: `Phased roadmap with milestones and timeline. Ensure total estimated effort (person-days) is consistent with Feature List and Task Breakdown. Each phase should state its goal, included features (by FR ID), and exit criteria. Note dependencies between phases.`,
+    body: `Phased roadmap (minimal 3 fase) dengan milestone dan timeline. Per fase WAJIB menyebut: goal fase, fitur yang disertakan (by FR ID), exit criteria terukur, dan estimasi effort (person-day, indikatif). TOTAL person-day antar fase harus KONSISTEN dengan total di Task Breakdown dan Feature List. Note dependencies between phases.`,
   },
   {
     key: 'task_breakdown',
@@ -120,11 +120,22 @@ function truncate(text: string | undefined, max: number): string {
   return text.length <= max ? text : `${text.slice(0, max).trimEnd()}…`;
 }
 
-export async function getFewShotExamples(limit = 2): Promise<FewShotExample[]> {
+/**
+ * Recent completed PRDs used as few-shot exemplars.
+ * STRICTLY owner-scoped: `userId` filters the query so one user's PRD content
+ * is never injected into another user's prompt. A null userId (no auth
+ * context) skips the DB entirely — no cross-tenant fallback.
+ */
+export async function getFewShotExamples(
+  userId: string | null,
+  limit = 2
+): Promise<FewShotExample[]> {
+  if (!userId) return [];
   try {
     const prds = await prisma.pRD.findMany({
       where: {
         status: 'completed',
+        userId,
         content: { not: null as never },
       },
       orderBy: [{ updatedAt: 'desc' }],
@@ -251,18 +262,17 @@ CRITICAL FORMATTING RULES (violating these breaks the parser):
 
 ${sectionsBlock}${fewShotSection}
 
-# QUALITY BAR
-- Be specific and actionable, never generic. Every claim should be defensible.
-- MEASURABLE REQUIREMENTS: quantify every requirement and metric — "return results within 200ms for a 10k-record dataset", never "fast"/"intuitive". Vague adjectives are defects.
-- AI FEATURE EVALUATION: for any AI-powered feature, define how output quality is measured (benchmark set, pass rate, citation accuracy, eval cadence) — in Goals & Success Metrics or Functional Requirements.
-- NON-GOALS: explicitly list what is OUT of scope (Won't-have) so the timeline is protected — never leave scope ambiguous.
-- Tailor content to THIS product, platform, and tech stack — no filler that could apply to any app.
-- Label assumptions "(asumsi)" and estimates "(indikatif)"; push real unknowns to Open Questions instead of inventing facts.
-- Keep IDs, effort, and scope internally consistent across sections.
-- Output ONLY the PRD content — no preamble, no closing remarks, no <think> tags.
-- Do NOT leave any section empty or with placeholder text. Every table needs a proper header + separator row.
-- NO META-COMMENTARY: never include deliberation, option-weighing, or questions to yourself (e.g. "which is safer?"). Every sentence is final deliverable content — write as if submitting to stakeholders.
-- Match the language of the user's idea (default Bahasa Indonesia).${previousSection}`;
+# QUALITY CONTRACT (non-negotiable)
+
+1. BAHASA & GAYA. Tulis Bahasa Indonesia formal-produk (bukan bahasa chat). Istilah teknis tetap dalam bahasa Inggris bila itu istilah baku: onboarding, retention, churn, webhook, idempotency, dsb. Tidak ada basa-basi pembuka/penutup.
+2. DILARANG KERAS: kalimat pembuka meta ("Berikut adalah…", "Berikut PRD…"), emoji, meta-commentary/delikerasi, bullet satu baris tanpa penjelasan, dan klaim kuantitatif tanpa angka — angka harus ada, atau diberi label "(indikatif)" bila estimasi, "(asumsi)" bila dugaan.
+3. SUBSTANSI. Setiap section minimal ~250 kata KECUALI section yang memang tabular (Glossary, Feature List, Functional/Non-Functional Requirements, Risk Assessment, Task Breakdown — di sana tabelnya sendiri adalah substansi; tambahkan paragraf pembuka 1-2 kalimat). Satu paragraf dua kalimat untuk section naratif adalah DEFECT.
+4. TABEL. Semua data terstruktur memakai pipe-table Markdown dengan header + separator \`| --- |\` (aturan lengkap di OUTPUT CONTRACT di atas). Tabel kompleks boleh ditambah bullet penjelasan setelahnya.
+5. STABIL ID & CROSS-REFERENCE. ID wajib ada dan KONSISTEN dirujuk silang antar section: G-01… (goals), FR-01… (functional), NFR-P01… (non-functional performance, NFR-S01 security, dst. per kategori), R-01… (risks), OQ-01… (open questions), T-01… (tasks), US-01… (stories). Roadmap menyebut FR ID yang disertakan; Risk Assessment menyebut NFR/FR ID yang memitigasi; Task Breakdown menyebut FR/phase; API Specification menyebut FR ID. Angka effort (person-day) konsisten antara Feature List ↔ Roadmap ↔ Task Breakdown.
+6. SCOPE. Output HANYA section yang diminta untuk request ini, berurutan sesuai daftar, dimulai LANGSUNG dengan heading section pertama (## …). Jangan output section lain.
+7. FEW-SHOT. Bila Few-Shot Examples disediakan: tiru KEDALAMAN dan rigor-nya (specificity, struktur, keputusan yang grounded), BUKAN konten/bahasanya — jangan menyalin domain atau kalimat dari example.
+8. BE SPECIFIC & MEASURABLE. Every claim defensible; every requirement/metric quantified — "return results within 200ms for a 10k-record dataset", never "fast"/"intuitive". Vague adjectives are defects. For any AI-powered feature, define how output quality is measured (benchmark set, pass rate, eval cadence) — in Goals & Success Metrics or Functional Requirements.
+9. TAILOR & GROUND. Tailor content to THIS product, platform, and tech stack — no filler that could apply to any app. Label assumptions "(asumsi)" and estimates "(indikatif)"; push real unknowns to Open Questions instead of inventing facts. Do NOT leave any section empty or with placeholder text. No closing remarks.${previousSection}`;
 }
 
 export function buildUserPrompt(input: PRDFormInput): string {

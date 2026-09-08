@@ -1,38 +1,31 @@
 import {
-  buildCustomCandidate,
   buildProviderCandidates,
   openProviderStream,
   parseTokenStream,
   parseAnthropicStream,
 } from '@/lib/ai/providers';
 import type { StreamChunk } from '@/lib/ai/providers';
+import { buildEngineCandidates, type EngineRequestBody, type EngineCandidatesResult } from '@/lib/ai/engine-candidates';
 
 export function sse(data: object) {
   return `data: ${JSON.stringify(data)}\n\n`;
 }
 
-export interface PlanRequestBody {
-  model_id?: string;
-  base_url?: string;
-  api_key?: string;
-  compat?: string;
-}
+export type PlanRequestBody = EngineRequestBody;
 
 /**
  * Build the ordered provider candidates for a plan request, honoring a
- * user-configured custom engine (which wins over built-ins).
+ * user-configured custom engine (which wins over built-ins). Keys are
+ * resolved + decrypted server-side from the saved engine row.
+ * Returns `{ ok: false, error }` when the request must be rejected (400).
  */
-export function planCandidates(body: PlanRequestBody) {
+export async function planCandidates(
+  userId: string,
+  body: PlanRequestBody
+): Promise<EngineCandidatesResult> {
   const modelId = body.model_id ?? '';
-  const candidates = modelId ? buildProviderCandidates(modelId) : [];
-  const custom = buildCustomCandidate({
-    modelId,
-    baseUrl: body.base_url,
-    apiKey: body.api_key,
-    compat: body.compat,
-  });
-  if (custom) candidates.unshift(custom);
-  return candidates;
+  if (!modelId) return { ok: true, candidates: [] };
+  return buildEngineCandidates(userId, body);
 }
 
 type Candidate = ReturnType<typeof buildProviderCandidates>[number];
@@ -55,10 +48,10 @@ export async function runPlanStream(params: {
 
   // Request-wide deadline: abort a hung/slow provider well before Vercel's
   // 300s hard kill so we can emit a clean error instead of a silent timeout.
-  const deadline = Date.now() + 280_000;
+  const deadline = Date.now() + (Number(process.env.AI_STREAM_DEADLINE_MS) || 280_000);
   // No-activity timeout: some proxies accept a streaming request then never
   // send a chunk. Abort fast instead of burning the whole deadline in silence.
-  const INACTIVITY_MS = 60_000;
+  const INACTIVITY_MS = Number(process.env.AI_STREAM_INACTIVITY_MS) || 200_000;
   let stalled = false;
 
   for (const cand of candidates) {

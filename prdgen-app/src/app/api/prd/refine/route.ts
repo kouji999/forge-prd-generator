@@ -1,6 +1,4 @@
 import {
-  buildCustomCandidate,
-  buildProviderCandidates,
   openProviderStream,
   parseTokenStream,
   parseAnthropicStream,
@@ -9,6 +7,7 @@ import { getAuthUser } from '@/lib/auth/get-auth-user';
 import type { StreamChunk } from '@/lib/ai/providers';
 import type { PRDSectionKey } from '@/types';
 import { getFewShotExamples } from '@/lib/ai/prompts';
+import { buildEngineCandidates, type ResolvedEngineCandidate } from '@/lib/ai/engine-candidates';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
@@ -51,6 +50,9 @@ interface RefineRequest {
   selection?: string;
   /** 'edit' rewrites the section (default); 'ask' just answers, no changes. */
   mode?: 'edit' | 'ask';
+  /** Saved CustomEngine id — key resolved + decrypted server-side. */
+  engine_id?: string;
+  /** Ad-hoc (unsaved) engine — base_url is SSRF-guarded before use. */
   base_url?: string;
   api_key?: string;
   compat?: string;
@@ -63,14 +65,17 @@ export async function POST(req: Request) {
   const encoder = new TextEncoder();
   const body = (await req.json().catch(() => ({}))) as Partial<RefineRequest>;
 
-  const { model_id, section_key, content, instruction, selection, mode, base_url, api_key, compat } = body;
+  const { model_id, section_key, content, instruction, selection, mode, engine_id, base_url, api_key, compat } = body;
   const isAsk = mode === 'ask';
-  const candidates = model_id ? buildProviderCandidates(model_id) : [];
-  // User-configured custom engine wins — built-ins stay as failover.
-  if (model_id) {
-    const custom = buildCustomCandidate({ modelId: model_id, baseUrl: base_url, apiKey: api_key, compat });
-    if (custom) candidates.unshift(custom);
+  // Custom engine (saved → server-side key resolution; ad-hoc → SSRF guard)
+  // wins — built-ins stay as failover.
+  const resolved = model_id
+    ? await buildEngineCandidates(user.id, { model_id, engine_id, base_url, api_key, compat })
+    : ({ ok: true as const, candidates: [] as ResolvedEngineCandidate[] });
+  if (!resolved.ok) {
+    return new Response(JSON.stringify({ error: resolved.error }), { status: 400 });
   }
+  const candidates = resolved.candidates;
   const useRealAI = Boolean(candidates.length > 0 && content && instruction);
 
   const stream = new ReadableStream({
@@ -82,8 +87,8 @@ export async function POST(req: Request) {
           return;
         }
 
-        // Fetch few-shot examples from past PRDs for better grounding.
-        const examples = await getFewShotExamples(1);
+        // Few-shot grounding from the user's OWN completed PRDs (owner-scoped).
+        const examples = await getFewShotExamples(user.id, 1);
         const exCtx = examples.length > 0
           ? `\n\nReference PRD context (from a previously completed PRD titled "${examples[0].title}"):\n${examples[0].executive_summary}\n\nMaintain similar specificity and rigor.`
           : '';
@@ -92,10 +97,10 @@ export async function POST(req: Request) {
         let lastError: unknown = null;
         // Request-wide deadline: abort a hung/slow provider before Vercel's
         // 300s hard kill so we can emit a clean error event.
-        const deadline = Date.now() + 280_000;
+        const deadline = Date.now() + (Number(process.env.AI_STREAM_DEADLINE_MS) || 280_000);
         // No-activity timeout: some proxies accept a streaming request then
         // never send a chunk. Abort fast instead of waiting out the deadline.
-        const INACTIVITY_MS = 90_000;
+        const INACTIVITY_MS = Number(process.env.AI_STREAM_INACTIVITY_MS) || 200_000;
         let stalled = false;
         for (const cand of candidates) {
           // Out of time — don't start another candidate.

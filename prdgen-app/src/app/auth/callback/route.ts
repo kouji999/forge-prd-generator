@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
+import { isSupabaseConfigured } from '@/lib/supabase/config';
 import { prisma } from '@/lib/db/prisma';
 
 export const dynamic = 'force-dynamic';
@@ -12,6 +13,13 @@ export const dynamic = 'force-dynamic';
  */
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url);
+
+  // Dev fallback (no Supabase configured): no OAuth/magic-link flow exists,
+  // so a callback hit can never succeed — go straight to login (dev card).
+  if (!isSupabaseConfigured()) {
+    return NextResponse.redirect(`${origin}/login`);
+  }
+
   const code = searchParams.get('code');
   const tokenHash = searchParams.get('token_hash');
   const type = searchParams.get('type');

@@ -14,6 +14,7 @@ import {
   MessageSquare,
   Send,
   X,
+  Loader2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -41,7 +42,8 @@ import { exportPRDToPdf } from '@/lib/pdf';
 import { usePRDStore } from '@/stores/prd-store';
 import { PRD_SECTIONS } from '@/types';
 import { getModelById } from '@/lib/ai/models';
-import { fetchEngineBody } from '@/lib/engines-client';
+import { fetchEngineRef } from '@/lib/engines-client';
+import { isUuid } from '@/lib/is-uuid';
 import { cn } from '@/lib/utils';
 import type {
   PRD,
@@ -99,7 +101,7 @@ export default function WorkspacePage() {
   const router = useRouter();
   const workspaceId = params.id as string;
   const shouldGenerate = searchParams.get('generate') === 'true';
-  const modelParam = searchParams.get('model') ?? 'gpt-4o';
+  const modelParam = searchParams.get('model') ?? '9router-auto';
 
   // The model actually used for generation. Initialized from the URL, but
   // overridden by the persisted model when an existing workspace is loaded so
@@ -117,13 +119,21 @@ export default function WorkspacePage() {
   const [completedSteps, setCompletedSteps] = useState<PlanStep[]>([]);
   const [structure, setStructure] = useState<PlanStructure | null>(null);
   const [prdContent, setPrdContent] = useState<Partial<PRDContent>>({});
+  // Persisted workspace id (create-once, then PUT).
   const [savedId, setSavedId] = useState<string | null>(null);
+  // Real DB row id reported by /api/prd/generate (server-side persistence).
+  // A ref so the long-running generatePRD loop and persist() always see the
+  // freshest value regardless of render closures.
+  const serverPrdIdRef = useRef<string | null>(null);
 
   // Phase working state
   const [structureLoading, setStructureLoading] = useState(false);
   const [prdStreaming, setPrdStreaming] = useState(false);
   const [prdSection, setPrdSection] = useState<PRDSectionKey | null>(null);
   const [prdProgress, setPrdProgress] = useState(0);
+  // Which section-group request is in flight: { current, total } recomputed
+  // per retry round. Null when idle.
+  const [prdBatch, setPrdBatch] = useState<{ current: number; total: number; sections: number } | null>(null);
   const [thinking, setThinking] = useState(false);
 
   // Mirror the latest PRD content in a ref so async persist() never saves a
@@ -318,7 +328,7 @@ export default function WorkspacePage() {
     setStructureLoading(true);
     setActiveStep('structure');
     setThinking(false);
-    const engineBody = await fetchEngineBody(activeModel);
+    const engineRef = await fetchEngineRef(activeModel);
     try {
       let received: PlanStructure | null = null;
       // Slow models sometimes die before emitting the structure event. Retry
@@ -328,7 +338,7 @@ export default function WorkspacePage() {
           const res = await fetch('/api/plan/structure', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ model_id: activeModel, idea: ideaText, ...(engineBody ?? {}) }),
+            body: JSON.stringify({ model_id: activeModel, idea: ideaText, ...(engineRef ?? {}) }),
           });
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
@@ -381,7 +391,7 @@ export default function WorkspacePage() {
     setPrdProgress(0);
     setPrdContent({});
     setThinking(false);
-    const engineBody = await fetchEngineBody(activeModel);
+    const engineRef = await fetchEngineRef(activeModel);
 
     // Local accumulator — synchronously available for completeness checks
     // after the stream ends (state/ref may lag behind due to React batching).
@@ -404,7 +414,7 @@ export default function WorkspacePage() {
       const completed = new Set<PRDSectionKey>();
       let localSection: PRDSectionKey | null = null;
       const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), 290_000);
+      const timer = setTimeout(() => ctrl.abort(), 900_000);
       try {
         const res = await fetch('/api/prd/generate', {
           method: 'POST',
@@ -415,7 +425,9 @@ export default function WorkspacePage() {
             structure,
             sections: keys,
             previous: prevSnapshot,
-            ...(engineBody ?? {}),
+            // Attach to the same server-side row across all section groups.
+            prd_id: serverPrdIdRef.current ?? undefined,
+            ...(engineRef ?? {}),
           }),
           signal: ctrl.signal,
         });
@@ -452,6 +464,14 @@ export default function WorkspacePage() {
               if (!groupSet.has(event.section)) break;
               completed.add(event.section);
               localSection = null;
+              break;
+            case 'done':
+              // Server persisted the row — remember the real id so later
+              // groups + persist() update it instead of creating duplicates.
+              if (event.persisted && isUuid(event.prd_id)) {
+                serverPrdIdRef.current = event.prd_id;
+                setSavedId((prev) => prev ?? event.prd_id);
+              }
               break;
             case 'error':
               // Surface server-side failures via the normal rejection path so
@@ -516,10 +536,16 @@ export default function WorkspacePage() {
         // single reasoning phase (the dominant cost on reasoning engines).
         const GROUP_SIZE = 3;
         const todo = missingKeys();
+        // Batch label counts groups for THIS round; a retry round recomputes
+        // (and its toast already announces the new pass).
+        const totalBatches = Math.ceil(todo.length / GROUP_SIZE);
+        let batchNo = 0;
         for (let g = 0; g < todo.length; g += GROUP_SIZE) {
           const group = todo.slice(g, g + GROUP_SIZE);
           // Resume: another path may have filled them; skip fully-filled groups.
           if (group.every((k) => (contentAcc[k] ?? '').trim().length > 0)) continue;
+          batchNo += 1;
+          setPrdBatch({ current: batchNo, total: totalBatches, sections: group.length });
 
           // Sequential → `previous` naturally carries ALL prior sections.
           const prevSnapshot = { ...contentAcc };
@@ -595,6 +621,7 @@ export default function WorkspacePage() {
     } finally {
       setPrdStreaming(false);
       setThinking(false);
+      setPrdBatch(null);
     }
   }
 
@@ -608,8 +635,11 @@ export default function WorkspacePage() {
     // Prefer an explicit snapshot (the local accumulator from generatePRD,
     // which is always up to date); fall back to the freshest state mirror.
     const contentToSave = contentOverride ?? prdContentRef.current;
+    // The generate route may already have created the row server-side — use
+    // that id so the first save is a PUT, not a duplicate POST.
+    const dbId = savedId ?? serverPrdIdRef.current;
     try {
-      if (!savedId) {
+      if (!dbId) {
         const res = await fetch('/api/prd', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -627,12 +657,13 @@ export default function WorkspacePage() {
         const realId = json?.data?.id;
         if (realId) {
           setSavedId(realId);
+          serverPrdIdRef.current = realId;
           // Swap the URL to the persisted id WITHOUT a full navigation, so we
           // don't re-trigger the load effect and reset in-memory progress.
           window.history.replaceState(null, '', `/workspace/${realId}`);
         }
       } else {
-        await fetch(`/api/prd/${savedId}`, {
+        await fetch(`/api/prd/${dbId}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -658,6 +689,8 @@ export default function WorkspacePage() {
   // ── PRD object for export helpers ──
   const prdObj: PRD = {
     id: savedId ?? workspaceId,
+    // Export helpers only read title/content — user id is not available
+    // client-side (no /api/me); left as a placeholder on purpose.
     user_id: 'user-mock',
     title,
     description: null,
@@ -778,7 +811,7 @@ export default function WorkspacePage() {
     // append tokens to the wrong conversation.
     const setThread = mode === 'ask' ? setAskMessages : setEditMessages;
     const controller = new AbortController();
-    const engineBody = await fetchEngineBody(activeModel);
+    const engineRef = await fetchEngineRef(activeModel);
     try {
       const res = await fetch('/api/prd/refine', {
         method: 'POST',
@@ -790,7 +823,7 @@ export default function WorkspacePage() {
           instruction,
           selection,
           mode,
-          ...(engineBody ?? {}),
+          ...(engineRef ?? {}),
         }),
         signal: controller.signal,
       });
@@ -935,7 +968,30 @@ export default function WorkspacePage() {
         )}
 
         {activeStep === 'prd' && (
-          <div className="flex h-full overflow-hidden">
+          <div className="flex h-full flex-col overflow-hidden">
+            {/* Generation status strip — batch + section pointer */}
+            {(prdStreaming || prdBatch) && (
+              <div className="flex shrink-0 items-center gap-2 border-b border-border-paper bg-paper-soft px-4 py-1.5 font-mono text-xs text-ink-dim">
+                <Loader2 className="size-3.5 animate-spin text-primary" />
+                {prdBatch ? (
+                  <span>
+                    Batch {prdBatch.current}/{prdBatch.total} · {prdBatch.sections} section
+                  </span>
+                ) : (
+                  <span>Menyiapkan…</span>
+                )}
+                <span className="mx-1 text-ink-faint">|</span>
+                <span className="text-primary">
+                  {thinking
+                    ? 'Model sedang berpikir…'
+                    : prdSection
+                      ? `Menulis: ${PRD_SECTIONS.find((s) => s.key === prdSection)?.title}…`
+                      : 'Memproses…'}
+                </span>
+                <span className="ml-auto text-ink-faint">{prdProgress}%</span>
+              </div>
+            )}
+            <div className="flex min-h-0 flex-1 overflow-hidden">
             {/* Editor */}
             <div className="relative flex-1 overflow-y-auto bg-paper-raised p-4 sm:p-8" ref={editorScrollRef}>
               <div className="mx-auto max-w-3xl space-y-6">
@@ -1117,6 +1173,7 @@ export default function WorkspacePage() {
                 </div>
               </div>
             </div>
+            </div>{/* /min-h-0 flex-1 wrapper */}
           </div>
         )}
       </div>

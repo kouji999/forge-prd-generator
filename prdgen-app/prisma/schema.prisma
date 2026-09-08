@@ -1,4 +1,4 @@
-// Prisma schema for AI PRD Generator
+// Prisma schema for FORGE — AI PRD Generator
 // Mirrors PRD.md section 11 (Data Model & Skema Database)
 // After editing: npx prisma generate && npx prisma migrate dev --name init
 

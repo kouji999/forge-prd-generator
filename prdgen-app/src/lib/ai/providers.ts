@@ -1,7 +1,7 @@
 /**
  * AI Provider Registry — all three providers are OpenAI-compatible.
  *
- * 9router:     Free-form model IDs (e.g. "cc/claude-opus-4-7"). Base URL from env.
+ * 9router:     Free-form model IDs ("9router-auto" → NINE_ROUTER_MODEL). Base URL from env.
  * agentrouter: Fixed model claude-opus-4-8. Base URL https://agentrouter.org/v1.
  * openrouter:  Maps internal IDs to OpenRouter slugs. Base URL https://openrouter.ai/api/v1.
  */
@@ -28,11 +28,14 @@ export const PROVIDERS: Record<string, AIProvider> = {
   '9router': {
     id: '9router',
     name: '9Router',
-    baseUrl: process.env.NINE_ROUTER_BASE_URL || 'https://api.9router.com/v1',
+    // User's local proxy is the primary endpoint.
+    baseUrl: process.env.NINE_ROUTER_BASE_URL || 'http://localhost:20128/v1',
     envKey: 'NINE_ROUTER_API_KEY',
     format: 'openai',
-    // 9router: model IDs are free-form, passed through directly.
-    // User picks whatever model 9router supports (e.g. "cc/claude-opus-4-7").
+    resolveModel: (modelId) =>
+      modelId === '9router-auto'
+        ? process.env.NINE_ROUTER_MODEL || 'Dev-Stack'
+        : modelId,
   },
   agentrouter: {
     id: 'agentrouter',
@@ -50,7 +53,7 @@ export const PROVIDERS: Record<string, AIProvider> = {
     format: 'openai',
     extraHeaders: {
       'HTTP-Referer': process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000',
-      'X-Title': 'PRDly',
+      'X-Title': 'FORGE',
     },
     resolveModel: (id) => OPENROUTER_MODEL_MAP[id] ?? id,
   },

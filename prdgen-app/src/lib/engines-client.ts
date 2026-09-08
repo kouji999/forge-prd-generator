@@ -1,39 +1,43 @@
 /**
  * Client-side custom-engine resolver.
  *
- * Engine configs now live per-user in the DB (GET /api/engines), not in
- * localStorage. This helper fetches the caller's engines once per browser
- * session and maps a model id/name to the request-body shape the generation
- * API routes read (`base_url` / `api_key` / `compat`).
+ * Engine configs live per-user in the DB (GET /api/engines). The API returns
+ * only a MASKED key — plaintext keys never reach the browser. Callers send
+ * the engine's `id` (`engine_id`) with generation requests; the server loads
+ * the row (owner-scoped) and decrypts the key itself
+ * (see src/lib/ai/engine-candidates.ts).
  *
  * Never throws: a null return means "no custom engine — let the server fall
  * back to its env-configured providers".
  */
 
-export interface EngineBody {
-  base_url: string;
-  api_key: string;
+export interface EngineRef {
+  /** Sent as `engine_id` on generate/refine/plan requests. */
+  engine_id: string;
+  /** Sent as `model_id` — the saved engine's model string. */
+  model_id: string;
   compat: string;
 }
 
-interface ApiEngine {
+export interface EngineListEntry {
   id: string;
   name: string;
   model: string;
   baseUrl?: string;
-  apiKey?: string;
-  compat?: string;
+  /** Mask like '••••abcd' — display only, never a usable key. */
+  apiKeyMasked?: string;
+  compat?: 'openai' | 'anthropic';
 }
 
 // Shared across all callers; a failed fetch resets this so a later call retries.
-let enginesPromise: Promise<ApiEngine[]> | null = null;
+let enginesPromise: Promise<EngineListEntry[]> | null = null;
 
-function loadEngines(): Promise<ApiEngine[]> {
+function loadEngines(): Promise<EngineListEntry[]> {
   if (!enginesPromise) {
     enginesPromise = fetch('/api/engines')
       .then(async (res) => {
         if (!res.ok) throw new Error(`engines fetch failed: ${res.status}`);
-        const json = (await res.json()) as { data?: ApiEngine[] };
+        const json = (await res.json()) as { data?: EngineListEntry[] };
         return Array.isArray(json.data) ? json.data : [];
       })
       .catch((err) => {
@@ -44,20 +48,26 @@ function loadEngines(): Promise<ApiEngine[]> {
   return enginesPromise;
 }
 
-export async function fetchEngineBody(
+/**
+ * Resolve the engine to reference in a generation request body.
+ * Returns `{ engine_id, model_id, compat }` — no key material — or null when
+ * no saved engine matches / the fetch fails (fallback: server env providers).
+ */
+export async function fetchEngineRef(
   modelId: string | null | undefined
-): Promise<EngineBody | null> {
+): Promise<EngineRef | null> {
   if (!modelId) return null;
   try {
     const engines = await loadEngines();
     const match = engines.find(
       (e) => e.model === modelId || e.id === modelId || e.name === modelId
     );
-    if (match?.baseUrl && match?.apiKey) {
-      return { base_url: match.baseUrl, api_key: match.apiKey, compat: match.compat ?? 'openai' };
+    if (match?.id) {
+      return { engine_id: match.id, model_id: match.model, compat: match.compat ?? 'openai' };
     }
-  } catch {
-    // swallow — null means "use server env providers"
+  } catch (err) {
+    // Log + degrade to null — generation still works via server env providers.
+    console.warn('[engines-client] engine lookup failed, falling back to server providers:', err);
   }
   return null;
 }

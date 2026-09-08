@@ -24,7 +24,11 @@ export async function POST(req: Request) {
   const body = (await req.json().catch(() => ({}))) as StructureRequest;
   const idea = (body.idea ?? '').trim();
 
-  const candidates = planCandidates(body);
+  const resolved = await planCandidates(user.id, body);
+  if (!resolved.ok) {
+    return new Response(JSON.stringify({ error: resolved.error }), { status: 400 });
+  }
+  const candidates = resolved.candidates;
   const canRun = Boolean(candidates.length > 0 && idea);
 
   const stream = new ReadableStream({

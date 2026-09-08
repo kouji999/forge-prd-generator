@@ -24,9 +24,22 @@ interface CustomEngine {
   name: string;
   model: string;
   baseUrl?: string;
-  apiKey?: string;
+  /** Masked ('••••abcd') — plaintext keys never reach the browser. */
+  apiKeyMasked?: string;
   compat: 'openai' | 'anthropic';
+  /** Synthetic built-in entry (local 9Router) — not editable/deletable. */
+  builtin?: boolean;
 }
+
+// Built-in engine shown when the user has no saved engines: resolves to the
+// 9Router provider config (local proxy, NINE_ROUTER_* env) on the server.
+const BUILTIN_ENGINE: CustomEngine = {
+  id: '9router-auto',
+  name: 'Dev-Stack',
+  model: '9router-auto',
+  compat: 'openai',
+  builtin: true,
+};
 
 interface Attachment {
   id: string;
@@ -90,7 +103,9 @@ export default function NewPlanPage() {
   // Test state for the unsaved config inside the Add/Edit dialog.
   const [dialogTest, setDialogTest] = useState<TestResult | null>(null);
 
-  // Load the user's engines from the database (encrypted at rest, decrypted here).
+  // Load the user's engines from the database (keys stay server-side, only
+  // masks are returned). Empty list → fall back to the built-in Dev-Stack
+  // engine so fresh users can generate via the local 9Router immediately.
   useEffect(() => {
     let cancelled = false;
     fetch('/api/engines')
@@ -98,10 +113,13 @@ export default function NewPlanPage() {
       .then((json) => {
         if (cancelled) return;
         const list = Array.isArray(json?.data) ? (json.data as CustomEngine[]) : [];
-        setCustomEngines(list);
-        if (list[0]?.id) setSelectedModel(list[0].id);
+        const engines = list.length > 0 ? list : [BUILTIN_ENGINE];
+        setCustomEngines(engines);
+        if (engines[0]?.id) setSelectedModel(engines[0].id);
       })
-      .catch(() => {})
+      .catch(() => {
+        if (!cancelled) setCustomEngines([BUILTIN_ENGINE]);
+      })
       .finally(() => {
         if (!cancelled) setEnginesLoading(false);
       });
@@ -217,10 +235,9 @@ export default function NewPlanPage() {
     const fullIdea = `${idea.trim()}${attachmentText}`;
 
     const modelId = engine.model || selectedModel;
+    // Built-in card = no saved engine row — server resolves 9router-auto from env.
     setPendingIdea(fullIdea, engine.name, {
-      baseUrl: engine.baseUrl,
-      apiKey: engine.apiKey,
-      compat: engine.compat,
+      engineId: engine.builtin ? undefined : engine.id,
     });
 
     const workspaceId = `plan-${Date.now()}`;
@@ -243,7 +260,8 @@ export default function NewPlanPage() {
     setNewEngineName(eng.name);
     setNewEngineId(eng.model);
     setNewEngineBaseUrl(eng.baseUrl ?? '');
-    setNewEngineApiKey(eng.apiKey ?? '');
+    // Key is never sent to the browser — leave empty; typing a value rotates it.
+    setNewEngineApiKey('');
     setNewEngineCompat(eng.compat);
     setDialogTest(null);
     setEngineDialogOpen(true);
@@ -292,9 +310,10 @@ export default function NewPlanPage() {
         setError(json?.error ?? 'Gagal menyimpan engine.');
         return;
       }
-      const eng = json.data as CustomEngine;
-      setCustomEngines((prev) => [...prev, eng]);
-      setSelectedModel(eng.id);
+        const eng = json.data as CustomEngine;
+        // Drop the built-in placeholder once a real engine exists.
+        setCustomEngines((prev) => [...prev.filter((e) => !e.builtin), eng]);
+        setSelectedModel(eng.id);
       resetEngineForm();
     } catch {
       setError('Terjadi kesalahan jaringan.');
@@ -306,8 +325,10 @@ export default function NewPlanPage() {
   async function deleteEngine(id: string) {
     setCustomEngines((prev) => {
       const next = prev.filter((e) => e.id !== id);
-      if (selectedModel === id) setSelectedModel(next[0]?.id ?? '');
-      return next;
+      // No engines left → back to the built-in Dev-Stack fallback.
+      const list = next.length > 0 ? next : [BUILTIN_ENGINE];
+      if (selectedModel === id) setSelectedModel(list[0]?.id ?? '');
+      return list;
     });
     await fetch(`/api/engines?id=${encodeURIComponent(id)}`, { method: 'DELETE' }).catch(() => {});
   }
@@ -564,8 +585,16 @@ export default function NewPlanPage() {
                     <div className="min-w-0 flex-1 pr-16">
                       <p className={cn('text-sm font-semibold', selectedModel === eng.id ? 'text-primary' : 'text-ink')}>
                         {eng.name}
+                        {eng.builtin && (
+                          <span className="ml-1.5 rounded bg-muted px-1 py-0.5 font-mono text-[9px] font-normal text-ink-dim">
+                            default
+                          </span>
+                        )}
                       </p>
                       <p className="truncate font-mono text-[10px] text-ink-faint">{eng.model}</p>
+                      {eng.apiKeyMasked && (
+                        <p className="font-mono text-[10px] text-ink-faint">Key {eng.apiKeyMasked}</p>
+                      )}
                       {testing[eng.id] && (
                         <p className="mt-1 truncate font-mono text-[10px]">
                           {testing[eng.id]?.status === 'testing' && (
@@ -593,37 +622,41 @@ export default function NewPlanPage() {
                     </div>
                   </button>
                   <div className="absolute right-1.5 top-1.5 flex items-center gap-0.5">
-                    <button
-                      type="button"
-                      onClick={() => testEngine(eng.id)}
-                      title="Test koneksi"
-                      aria-label="Test koneksi"
-                      className="flex size-6 items-center justify-center rounded text-ink-faint opacity-0 transition-opacity hover:bg-ink/5 hover:text-primary group-hover:opacity-100"
-                    >
-                      {testing[eng.id]?.status === 'testing' ? (
-                        <Loader2 className="size-3.5 animate-spin" />
-                      ) : (
-                        <PlugZap className="size-3.5" />
-                      )}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => openEditEngine(eng)}
-                      title="Edit engine"
-                      aria-label="Edit engine"
-                      className="flex size-6 items-center justify-center rounded text-ink-faint opacity-0 transition-opacity hover:bg-ink/5 hover:text-ink group-hover:opacity-100"
-                    >
-                      <Pencil className="size-3.5" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => deleteEngine(eng.id)}
-                      title="Hapus engine"
-                      aria-label="Hapus engine"
-                      className="flex size-6 items-center justify-center rounded text-ink-faint opacity-0 transition-opacity hover:bg-stamp/10 hover:text-stamp group-hover:opacity-100"
-                    >
-                      <Trash2 className="size-3.5" />
-                    </button>
+                    {!eng.builtin && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => testEngine(eng.id)}
+                          title="Test koneksi"
+                          aria-label="Test koneksi"
+                          className="flex size-6 items-center justify-center rounded text-ink-faint opacity-0 transition-opacity hover:bg-ink/5 hover:text-primary group-hover:opacity-100"
+                        >
+                          {testing[eng.id]?.status === 'testing' ? (
+                            <Loader2 className="size-3.5 animate-spin" />
+                          ) : (
+                            <PlugZap className="size-3.5" />
+                          )}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => openEditEngine(eng)}
+                          title="Edit engine"
+                          aria-label="Edit engine"
+                          className="flex size-6 items-center justify-center rounded text-ink-faint opacity-0 transition-opacity hover:bg-ink/5 hover:text-ink group-hover:opacity-100"
+                        >
+                          <Pencil className="size-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => deleteEngine(eng.id)}
+                          title="Hapus engine"
+                          aria-label="Hapus engine"
+                          className="flex size-6 items-center justify-center rounded text-ink-faint opacity-0 transition-opacity hover:bg-stamp/10 hover:text-stamp group-hover:opacity-100"
+                        >
+                          <Trash2 className="size-3.5" />
+                        </button>
+                      </>
+                    )}
                   </div>
                 </div>
               ))}
@@ -714,9 +747,18 @@ export default function NewPlanPage() {
                   setNewEngineApiKey(e.target.value);
                   setDialogTest(null);
                 }}
-                placeholder="Optional — override env key"
+                placeholder={
+                  editingEngineId
+                    ? 'Kosongkan untuk memakai key yang tersimpan'
+                    : 'Optional — override env key'
+                }
                 className="border-border-paper bg-paper-raised font-mono focus-visible:ring-primary"
               />
+              {editingEngineId && (
+                <p className="font-mono text-[10px] text-ink-faint">
+                  Key tersimpan: {customEngines.find((e) => e.id === editingEngineId)?.apiKeyMasked ?? '—'}
+                </p>
+              )}
             </div>
             <div className="space-y-1.5">
               <Label className="text-sm font-medium text-ink">Kompatibilitas API</Label>

@@ -12,7 +12,7 @@ const NAV_ITEMS = [
   { href: '/new', label: 'Perencanaan Baru', icon: FilePlus },
 ] as const;
 
-const STORAGE_KEY = 'prdgen.sidebarPinned';
+const STORAGE_KEY = 'forge.sidebarPinned';
 
 /**
  * Collapsible sidebar with the 21st.dev / Aceternity animation:
@@ -67,7 +67,7 @@ export function DashboardSidebar() {
             open ? 'opacity-100' : 'opacity-0'
           )}
         >
-          PRDly
+          FORGE
         </span>
       </div>
 

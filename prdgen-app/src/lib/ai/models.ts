@@ -2,6 +2,14 @@ import type { AIModel } from '@/types';
 
 export const AI_MODELS: AIModel[] = [
   {
+    id: '9router-auto',
+    name: 'Dev-Stack',
+    provider: '9Router',
+    speed: 4,
+    quality: 5,
+    description: 'Model default via local proxy 9Router (Dev-Stack) — langsung siap tanpa setup.',
+  },
+  {
     id: 'agentrouter-opus',
     name: 'Claude Opus 4 (AgentRouter)',
     provider: 'AgentRouter',

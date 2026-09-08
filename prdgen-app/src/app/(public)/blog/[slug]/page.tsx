@@ -8,7 +8,7 @@ const POSTS: Record<string, { title: string; date: string; author: string; conte
   'cara-menulis-prd-yang-baik': {
     title: 'Cara Menulis PRD yang Baik untuk AI Coding Agent',
     date: '2026-08-01',
-    author: 'Tim PRDly',
+    author: 'Tim FORGE',
     content: `
 ## Pendahuluan
 
@@ -54,13 +54,13 @@ Untuk setiap fitur, definisikan kriteria sukses yang bisa diukur.
 
 ---
 
-**Kesimpulan:** PRD yang baik menghemat waktu development dan menghasilkan kode yang lebih konsisten. Gunakan PRDly untuk membuat PRD profesional dalam hitungan menit.
+**Kesimpulan:** PRD yang baik menghemat waktu development dan menghasilkan kode yang lebih konsisten. Gunakan FORGE untuk membuat PRD profesional dalam hitungan menit.
     `,
   },
   'mengapa-prd-penting': {
     title: 'Mengapa PRD Penting Sebelum Mulai Coding',
     date: '2026-07-28',
-    author: 'Tim PRDly',
+    author: 'Tim FORGE',
     content: `
 ## Mengapa PRD Penting?
 
@@ -92,7 +92,7 @@ Mulai buat PRD Anda sekarang!
   'tips-menggunakan-ai-model': {
     title: '5 Tips Memilih AI Model yang Tepat untuk Generate PRD',
     date: '2026-07-25',
-    author: 'Tim PRDly',
+    author: 'Tim FORGE',
     content: `
 ## Model Comparison
 

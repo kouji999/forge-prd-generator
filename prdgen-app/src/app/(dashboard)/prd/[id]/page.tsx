@@ -32,12 +32,12 @@ import { SectionCard } from '@/components/prd/SectionCard';
 import { VersionHistory } from '@/components/prd/VersionHistory';
 import { generateFullMarkdown, copyToClipboard, downloadMarkdown } from '@/lib/export';
 import { exportPRDToPdf } from '@/lib/pdf';
-import { MOCK_PRDS } from '@/lib/mock-data';
 import { parseSSEStream } from '@/lib/ai/stream';
 import { usePRDStore } from '@/stores/prd-store';
 import { PRD_SECTIONS } from '@/types';
 import { getModelById } from '@/lib/ai/models';
-import { fetchEngineBody } from '@/lib/engines-client';
+import { fetchEngineRef } from '@/lib/engines-client';
+import { isUuid } from '@/lib/is-uuid';
 import { cn } from '@/lib/utils';
 import type { PRD, PRDContent, PRDSectionKey, PRDStatus } from '@/types';
 import type { RefineStreamEvent } from '@/types/refine';
@@ -60,23 +60,24 @@ export default function PRDEditorPage() {
   const router = useRouter();
   const prdId = params.id as string;
   const shouldGenerate = searchParams.get('generate') === 'true';
-  const modelParam = searchParams.get('model') ?? 'gemini-flash';
+  const modelParam = searchParams.get('model') ?? '9router-auto';
 
-  // Find existing mock PRD or create new
-  const basePRD = MOCK_PRDS.find((p) => p.id === prdId);
-
-  const [title, setTitle] = useState(basePRD?.title ?? 'PRD Baru');
+  // DB is the source of truth; a non-UUID id (synthetic url) starts empty.
+  const [title, setTitle] = useState('PRD Baru');
   const [editingTitle, setEditingTitle] = useState(false);
-  const [status, setStatus] = useState<PRDStatus>(basePRD?.status ?? 'draft');
-  const [content, setContent] = useState<Partial<PRDContent>>(basePRD?.content ?? {});
+  const [status, setStatus] = useState<PRDStatus>('draft');
+  const [content, setContent] = useState<Partial<PRDContent>>({});
   const [streamingSection, setStreamingSection] = useState<PRDSectionKey | null>(null);
   const [progress, setProgress] = useState(0);
   const [isStreaming, setIsStreaming] = useState(false);
   const [thinking, setThinking] = useState(false);
   const [regeneratingSection, setRegeneratingSection] = useState<PRDSectionKey | null>(null);
 
-  // DB persistence: null = not yet saved / pure mock page
+  // DB persistence: null = not yet saved / synthetic local page
   const [savedId, setSavedId] = useState<string | null>(null);
+  // created_at from the DB row (export metadata), if loaded. State, not a
+  // ref — it's read during render (prdObj + bottom status bar).
+  const [baseCreatedAt, setBaseCreatedAt] = useState<string | null>(null);
   const clearPendingGeneration = usePRDStore((s) => s.clearPendingGeneration);
 
   // Chat
@@ -174,9 +175,10 @@ export default function PRDEditorPage() {
         setStatus(p.status ?? 'draft');
         setContent(p.content ?? {});
         setSavedId(p.id);
+        setBaseCreatedAt(p.created_at ?? null);
       })
       .catch(() => {
-        /* keep mock/basePRD fallback */
+        /* keep local defaults (synthetic id / network error) */
       });
     return () => {
       cancelled = true;
@@ -246,12 +248,21 @@ export default function PRDEditorPage() {
     const capturedModel = usePRDStore.getState().pendingModel;
     const capturedEngine = usePRDStore.getState().pendingEngine;
 
+    // The generate route persists the PRD server-side; when the done event
+    // reports a real DB id, we adopt it instead of POSTing a duplicate row.
+    let persistedPrdId: string | null = null;
+
     async function generate() {
       setIsStreaming(true);
       setStatus('generating');
       setProgress(0);
       const productName = capturedInput?.product_name?.trim();
       if (productName) setTitle(productName);
+
+      // Attach to the persisted server-side row when the URL already carries
+      // a real DB id (e.g. a resumed workspace PRD) so the server updates that
+      // row instead of creating a new one.
+      const prdIdFromUrl = isUuid(prdId) ? prdId : undefined;
 
       try {
         const res = await fetch('/api/prd/generate', {
@@ -260,9 +271,8 @@ export default function PRDEditorPage() {
           body: JSON.stringify({
             model_id: capturedModel ?? modelParam,
             input: capturedInput ?? undefined,
-            base_url: capturedEngine?.baseUrl,
-            api_key: capturedEngine?.apiKey,
-            compat: capturedEngine?.compat,
+            engine_id: capturedEngine?.engineId,
+            prd_id: prdIdFromUrl,
           }),
           signal: controller.signal,
         });
@@ -294,6 +304,16 @@ export default function PRDEditorPage() {
               if (idx >= 0) setProgress(Math.round(((idx + 1) / PRD_SECTIONS.length) * 100));
               break;
             case 'done':
+              // Server persisted a real row — adopt its id (skip client POST).
+              if (event.persisted && isUuid(event.prd_id)) {
+                persistedPrdId = event.prd_id;
+                setSavedId(event.prd_id);
+                lastSavedSnapshot.current = JSON.stringify({
+                  title,
+                  content: contentRef.current,
+                  status: 'completed',
+                });
+              }
               break;
             case 'error':
               toast.add({ title: 'Generate gagal', description: event.message, type: 'error' });
@@ -311,8 +331,15 @@ export default function PRDEditorPage() {
           setStatus('completed');
           clearPendingGeneration();
           toast.add({ title: 'PRD selesai!', description: 'PRD berhasil di-generate.', type: 'success' });
-          // Persist to database after the stream completes.
-          void saveToDb('completed', contentRef.current);
+          if (persistedPrdId) {
+            // Server-side persistence succeeded — point the URL at the real
+            // row; content is already identical in both places.
+            router.replace(`/prd/${persistedPrdId}`);
+          } else {
+            // Fallback: server persistence unavailable (e.g. DB down) — keep
+            // the existing client-side save flow.
+            void saveToDb('completed', contentRef.current);
+          }
         }
       } catch (err) {
         if (!controller.signal.aborted) {
@@ -376,7 +403,7 @@ export default function PRDEditorPage() {
   async function refine(sectionKey: PRDSectionKey, instruction: string, selection: string | undefined, sectionContent: string) {
     const controller = new AbortController();
     try {
-      const engineBody = await fetchEngineBody(modelParam);
+      const engineRef = await fetchEngineRef(modelParam);
 
       const res = await fetch('/api/prd/refine', {
         method: 'POST',
@@ -387,7 +414,7 @@ export default function PRDEditorPage() {
           content: sectionContent,
           instruction,
           selection,
-          ...(engineBody ?? {}),
+          ...(engineRef ?? {}),
         }),
         signal: controller.signal,
       });
@@ -429,7 +456,7 @@ export default function PRDEditorPage() {
     setRegeneratingSection(sectionKey);
     const controller = new AbortController();
     try {
-      const engineBody = await fetchEngineBody(modelParam);
+      const engineRef = await fetchEngineRef(modelParam);
 
       const res = await fetch('/api/prd/refine', {
         method: 'POST',
@@ -440,7 +467,7 @@ export default function PRDEditorPage() {
           content: sectionContent,
           instruction:
             'Tulis ulang section ini dari awal — lebih detail, lebih terstruktur, dan lebih spesifik berdasarkan konteks produk. Pertahankan format markdown.',
-          ...(engineBody ?? {}),
+          ...(engineRef ?? {}),
         }),
         signal: controller.signal,
       });
@@ -496,7 +523,7 @@ export default function PRDEditorPage() {
     content: content as PRDContent,
     markdown_content: null,
     model_used: modelParam,
-    created_at: basePRD?.created_at ?? new Date().toISOString(),
+    created_at: baseCreatedAt ?? new Date().toISOString(),
     updated_at: new Date().toISOString(),
   };
 
@@ -797,7 +824,7 @@ export default function PRDEditorPage() {
       {/* Bottom status bar */}
       <div className="shrink-0 border-t border-border-paper bg-muted px-4 py-2 font-mono text-xs text-ink-dim">
         <span className="mr-4">+ TERSIMPAN</span>
-        Dibuat: {new Date(prdObj.created_at).toLocaleString('id-ID')}
+        Dibuat: <span suppressHydrationWarning>{new Date(prdObj.created_at).toLocaleString('id-ID')}</span>
         <span className="mx-3 text-ink-faint">|</span>
         Model: <span className="text-primary">{displayModelName}</span>
       </div>

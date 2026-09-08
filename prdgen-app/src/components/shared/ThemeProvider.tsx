@@ -20,7 +20,7 @@ interface ThemeContextValue {
 
 const ThemeContext = createContext<ThemeContextValue | null>(null);
 
-const STORAGE_KEY = 'prdgen.theme';
+const STORAGE_KEY = 'forge.theme';
 
 /** Applies the resolved theme to <html> and returns it. Client-only. */
 function applyTheme(theme: Theme): Resolved {
@@ -100,4 +100,4 @@ export function useTheme() {
  * class from storage / OS preference, preventing a flash of the wrong theme.
  * Keep the STORAGE_KEY here in sync with the constant above.
  */
-export const themeNoFlashScript = `(function(){try{var k='prdgen.theme';var t=localStorage.getItem(k);var m=window.matchMedia('(prefers-color-scheme: dark)').matches;var d=t==='dark'||((t==='system'||!t)&&m);var e=document.documentElement;e.classList.toggle('dark',d);e.style.colorScheme=d?'dark':'light';}catch(e){}})();`;
+export const themeNoFlashScript = `(function(){try{var k='forge.theme';var t=localStorage.getItem(k);var m=window.matchMedia('(prefers-color-scheme: dark)').matches;var d=t==='dark'||((t==='system'||!t)&&m);var e=document.documentElement;e.classList.toggle('dark',d);e.style.colorScheme=d?'dark':'light';}catch(e){}})();`;

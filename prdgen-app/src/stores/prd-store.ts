@@ -4,9 +4,8 @@ import { create } from 'zustand';
 import type { PRD, PRDContent, PRDSectionKey, PRDStatus, PRDFormInput, PlanStructure, PlanStep } from '@/types';
 
 export interface PendingEngineConfig {
-  baseUrl?: string;
-  apiKey?: string;
-  compat?: 'openai' | 'anthropic';
+  /** Saved CustomEngine id — key stays server-side; resolved per request. */
+  engineId?: string;
 }
 
 interface PRDState {

@@ -2,7 +2,7 @@ import { Metadata } from 'next';
 import { APP_NAME, APP_DESCRIPTION } from '@/lib/constants';
 
 export const metadata: Metadata = {
-  metadataBase: new URL(process.env.NEXT_PUBLIC_BASE_URL || 'https://prdgenerator.id'),
+  metadataBase: new URL(process.env.NEXT_PUBLIC_BASE_URL || 'https://forge.raliq.dev'),
   title: {
     default: `${APP_NAME} — Generate PRD dengan AI`,
     template: `%s | ${APP_NAME}`,
@@ -46,6 +46,5 @@ export const metadata: Metadata = {
     card: 'summary_large_image',
     title: APP_NAME,
     description: APP_DESCRIPTION,
-    creator: '@prdgenerator',
   },
 };

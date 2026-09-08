@@ -92,6 +92,8 @@ export interface AIModel {
   provider: string;
   speed: number;
   quality: number;
+  /** Optional Indonesian copy shown next to the model in pickers. */
+  description?: string;
 }
 
 // ── Streaming ──
@@ -100,7 +102,7 @@ export type StreamEvent =
   | { type: 'token'; content: string }
   | { type: 'thinking' }
   | { type: 'section_end'; section: PRDSectionKey }
-  | { type: 'done'; prd_id: string }
+  | { type: 'done'; prd_id: string; persisted?: boolean }
   | { type: 'error'; message: string };
 
 // ── Workspace Plan (Struktur → PRD → Task flow) ──

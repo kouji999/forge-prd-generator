@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db/prisma';
 import { getAuthUser } from '@/lib/auth/get-auth-user';
 import { decryptSecret } from '@/lib/crypto';
+import { assertSafeBaseUrl } from '@/lib/net';
 import { buildCustomCandidate, buildProviderCandidates } from '@/lib/ai/providers';
 
 export const dynamic = 'force-dynamic';
@@ -156,11 +157,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Model ID wajib diisi.' }, { status: 400 });
   }
 
-  if (baseUrl && !/^https?:\/\//i.test(baseUrl)) {
-    return NextResponse.json(
-      { error: 'Base URL harus diawali http:// atau https://' },
-      { status: 400 }
-    );
+  // SSRF guard on every base URL that will actually be fetched — saved
+  // engines too (rows created before save-time validation may hold bad URLs).
+  if (baseUrl) {
+    const guard = assertSafeBaseUrl(baseUrl);
+    if (!guard.ok) {
+      return NextResponse.json({ error: `Base URL tidak aman: ${guard.reason}` }, { status: 400 });
+    }
   }
 
   // Choose the candidate the same way generation does.

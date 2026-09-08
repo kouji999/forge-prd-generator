@@ -8,7 +8,7 @@ const MOCK_POSTS = [
     title: 'Cara Menulis PRD yang Baik untuk AI Coding Agent',
     excerpt: 'Panduan lengkap menulis Product Requirements Document yang efektif untuk Cursor, Windsurf, dan tool AI coding lainnya.',
     date: '2026-08-01',
-    author: 'Tim PRDly',
+    author: 'Tim FORGE',
     readTime: '5 min',
   },
   {
@@ -16,7 +16,7 @@ const MOCK_POSTS = [
     title: 'Mengapa PRD Penting Sebelum Mulai Coding',
     excerpt: 'Mengapa product planning yang baik menghemat waktu development hingga 50% dan mengurangi bug di production.',
     date: '2026-07-28',
-    author: 'Tim PRDly',
+    author: 'Tim FORGE',
     readTime: '4 min',
   },
   {
@@ -24,7 +24,7 @@ const MOCK_POSTS = [
     title: '5 Tips Memilih AI Model yang Tepat untuk Generate PRD',
     excerpt: 'Kapan menggunakan GPT-4o, Claude Opus, atau Gemini? Panduan lengkap memilih model AI berdasarkan kebutuhan Anda.',
     date: '2026-07-25',
-    author: 'Tim PRDly',
+    author: 'Tim FORGE',
     readTime: '6 min',
   },
 ];

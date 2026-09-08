@@ -48,10 +48,10 @@ export async function exportPRDToPdf(
       <div class="pdf-cover">
         <h1>${escapeHtml(prd.title)}</h1>
         <div class="pdf-meta">PRODUCT REQUIREMENTS DOCUMENT &middot; ${escapeHtml(date)}</div>
-        <div class="pdf-meta" style="margin-top:4px;">Generated with PRDly</div>
+        <div class="pdf-meta" style="margin-top:4px;">Generated with FORGE</div>
       </div>
       ${sectionsHtml}
-      <div class="pdf-footer">Generated with PRDly</div>
+      <div class="pdf-footer">Generated with FORGE</div>
     </div>
   `;
   document.body.appendChild(container);

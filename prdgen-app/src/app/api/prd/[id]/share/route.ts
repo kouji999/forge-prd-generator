@@ -20,6 +20,27 @@ export async function POST(
   if (!prd) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
   try {
+    // Reuse an existing active, non-expired link so repeated clicks don't
+    // pile up rows in shared_links.
+    const existing = await prisma.sharedLink.findFirst({
+      where: {
+        prdId: id,
+        isActive: true,
+        OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (existing) {
+      return NextResponse.json({
+        id: existing.id,
+        prd_id: existing.prdId,
+        token: existing.token,
+        is_active: existing.isActive,
+        expires_at: existing.expiresAt,
+        url: `/share/${existing.token}`,
+      });
+    }
+
     const token = `${randomBytes(16).toString('hex')}`;
     const link = await prisma.sharedLink.create({
       data: { prdId: id, token, isActive: true },

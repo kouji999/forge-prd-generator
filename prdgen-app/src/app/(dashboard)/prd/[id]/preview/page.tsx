@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import ReactMarkdown from 'react-markdown';
@@ -9,13 +10,54 @@ import { ArrowLeft, Copy, Download } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui/toast';
 import { generateFullMarkdown, copyToClipboard, downloadMarkdown } from '@/lib/export';
-import { MOCK_PRDS } from '@/lib/mock-data';
 import { PRD_SECTIONS } from '@/types';
+import type { PRD } from '@/types';
 
 export default function PRDPreviewPage() {
   const params = useParams();
   const prdId = params.id as string;
-  const prd = MOCK_PRDS.find((p) => p.id === prdId) ?? MOCK_PRDS[0];
+
+  // Real data from the DB (same endpoint the editor uses).
+  const [prd, setPrd] = useState<PRD | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/prd/${prdId}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((json) => {
+        if (!cancelled) setPrd(json?.data ?? null);
+      })
+      .catch(() => {
+        if (!cancelled) setPrd(null);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [prdId]);
+
+  if (loading) {
+    return (
+      <div className="mx-auto flex max-w-4xl items-center justify-center px-4 py-24">
+        <p className="font-mono text-sm text-ink-faint">Memuat preview…</p>
+      </div>
+    );
+  }
+
+  if (!prd) {
+    return (
+      <div className="mx-auto max-w-4xl px-4 py-24 text-center">
+        <h1 className="text-lg font-bold text-ink">PRD tidak ditemukan</h1>
+        <p className="mt-2 text-sm text-ink-dim">Dokumen mungkin sudah dihapus atau bukan milikmu.</p>
+        <Link href="/dashboard" className="mt-6 inline-block rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90">
+          Kembali ke Dashboard
+        </Link>
+      </div>
+    );
+  }
 
   const markdown = generateFullMarkdown(prd);
 
@@ -25,7 +67,7 @@ export default function PRDPreviewPage() {
   }
 
   function handleDownload() {
-    downloadMarkdown(markdown, `${prd.title.replace(/\s+/g, '-').toLowerCase()}.md`);
+    downloadMarkdown(markdown, `${prd!.title.replace(/\s+/g, '-').toLowerCase()}.md`);
     toast.add({ title: 'Download dimulai', type: 'info' });
   }
 

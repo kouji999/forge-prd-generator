@@ -22,7 +22,7 @@ export function Footer() {
         </nav>
 
         <p className="text-xs text-ink-faint">
-          &copy; {new Date().getFullYear()} PRDly. All rights reserved.
+          &copy; {new Date().getFullYear()} FORGE. All rights reserved.
         </p>
       </div>
     </footer>
