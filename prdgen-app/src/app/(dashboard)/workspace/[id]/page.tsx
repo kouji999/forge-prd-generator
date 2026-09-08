@@ -256,6 +256,11 @@ export default function WorkspacePage() {
         if (p.structure) setStructure(p.structure);
         if (p.content) setPrdContent(p.content);
         setSavedId(p.id);
+        // Seed the server row id so generatePRD/persist attach to THIS row from
+        // the first request instead of creating a duplicate (observed: resume
+        // of an existing workspace row created a second PRD row because only
+        // the `done` SSE event ever set this ref).
+        serverPrdIdRef.current = p.id;
         const done: PlanStep[] = [];
         if (p.structure) done.push('structure');
         if (p.content && Object.keys(p.content).length > 0) done.push('prd');
@@ -1007,16 +1012,35 @@ export default function WorkspacePage() {
                     </Button>
                   </div>
                 ) : (
-                  PRD_SECTIONS.map((section) => (
-                    <SectionCard
-                      key={section.key}
-                      title={section.title}
-                      sectionKey={section.key}
-                      content={prdContent[section.key] ?? ''}
-                      isStreaming={prdSection === section.key}
-                      onContentChange={prdSectionHandlers(section.key)}
-                    />
-                  ))
+                  <>
+                    {PRD_SECTIONS.filter((s) => !(prdContent[s.key] ?? '').trim()).length > 0 &&
+                      !prdStreaming && (
+                        <div className="perf-ticket flex flex-wrap items-center justify-between gap-3 rounded-md p-5">
+                          <div>
+                            <p className="text-sm font-bold text-ink">
+                              {PRD_SECTIONS.filter((s) => !(prdContent[s.key] ?? '').trim()).length}{' '}
+                              section belum selesai
+                            </p>
+                            <p className="mt-0.5 text-xs text-ink-dim">
+                              Bagian yang sudah jadi tetap tersimpan — lanjutkan hanya yang kosong.
+                            </p>
+                          </div>
+                          <Button className="gap-2" onClick={generatePRD} disabled={!structure || isBusy}>
+                            <Sparkles className="size-4" /> Lanjutkan Generate
+                          </Button>
+                        </div>
+                      )}
+                    {PRD_SECTIONS.map((section) => (
+                      <SectionCard
+                        key={section.key}
+                        title={section.title}
+                        sectionKey={section.key}
+                        content={prdContent[section.key] ?? ''}
+                        isStreaming={prdSection === section.key}
+                        onContentChange={prdSectionHandlers(section.key)}
+                      />
+                    ))}
+                  </>
                 )}
               </div>
 

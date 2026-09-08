@@ -163,9 +163,16 @@ export async function POST(req: Request) {
           merged[key] = prevVal;
         }
       }
+      // Never downgrade: a merged write may ALREADY hold every section (e.g.
+      // the client disconnect races the 'completed' persist — observed: poll
+      // read 'completed', the abort handler then wrote 'failed' over 17/17
+      // content). Complete content is the source of truth, not the signal.
+      const finalStatus = PRD_SECTIONS.every((s) => (merged[s.key] ?? '').trim().length > 0)
+        ? 'completed'
+        : status;
       await prisma.pRD.update({
         where: { id: prdRowId },
-        data: { content: merged as Prisma.InputJsonValue, status },
+        data: { content: merged as Prisma.InputJsonValue, status: finalStatus },
       });
     } catch (err) {
       console.error(`[prd/generate] persist (${status}) failed for ${prdRowId}:`, err);
