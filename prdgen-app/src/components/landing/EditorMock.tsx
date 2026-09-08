@@ -62,7 +62,7 @@ export function EditorMock() {
               PRD: Aplikasi Kasir Warung Kopi
             </p>
             <p className="mt-0.5 font-mono text-[10px] tracking-wider text-ink-faint">
-              9ROUTER / GEMINI-2.5-PRO
+              9Router · Dev-Stack
             </p>
           </div>
           <span className="stamp shrink-0 text-accent">LIVE</span>
