@@ -1,12 +1,31 @@
 'use client';
 
+import { useSyncExternalStore } from 'react';
 import { Moon, Sun } from 'lucide-react';
 import { useTheme } from '@/components/shared/ThemeProvider';
 import { cn } from '@/lib/utils';
 
+function subscribeThemeStore(onChange: () => void) {
+  const observer = new MutationObserver(onChange);
+  observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+  return () => observer.disconnect();
+}
+
+function getThemeSnapshot() {
+  return document.documentElement.classList.contains('dark');
+}
+
+// Server + first client render always agree (false) — no hydration mismatch;
+// useSyncExternalStore re-renders with the real class value right after
+// hydration, and observes every class change (pre-paint script, provider
+// toggle) from then on.
+function getThemeServerSnapshot() {
+  return false;
+}
+
 export function ThemeToggle({ className }: { className?: string }) {
-  const { resolved, toggle } = useTheme();
-  const isDark = resolved === 'dark';
+  const { toggle } = useTheme();
+  const isDark = useSyncExternalStore(subscribeThemeStore, getThemeSnapshot, getThemeServerSnapshot);
 
   return (
     <button
