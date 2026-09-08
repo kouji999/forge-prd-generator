@@ -46,7 +46,14 @@ function readStored(): Theme {
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   // Initialize from what the pre-paint script already decided — no flash, no mismatch.
   const [theme, setThemeState] = useState<Theme>(readStored);
-  const [resolved, setResolved] = useState<Resolved>('light');
+  // Read the class the no-flash script set BEFORE first paint — lazy init so
+  // the first client render already agrees with the DOM (no sync setState in
+  // an effect, no extra cascading render).
+  const [resolved, setResolved] = useState<Resolved>(() =>
+    typeof document !== 'undefined' && document.documentElement.classList.contains('dark')
+      ? 'dark'
+      : 'light'
+  );
 
   const setTheme = useCallback((t: Theme) => {
     setThemeState(t);
@@ -71,9 +78,9 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     });
   }, []);
 
-  // Sync resolved on mount and react to OS changes while in "system".
+  // React to OS scheme changes while in "system" (and pick up the pre-paint
+  // class if JS ran before the provider mounted).
   useEffect(() => {
-    setResolved(applyTheme(theme));
     const mq = window.matchMedia('(prefers-color-scheme: dark)');
     const onChange = () => {
       if (theme === 'system') setResolved(applyTheme('system'));

@@ -190,6 +190,10 @@ export function MindmapCanvas({
     origX: 0,
     origY: 0,
   });
+  // Render-facing mirror of dragState.current.active — the ref is the mutable
+  // source for handlers; this state drives cursor/transition without reading
+  // refs during render.
+  const [dragging, setDragging] = useState(false);
 
   const fit = useCallback(() => {
     const el = containerRef.current;
@@ -243,6 +247,7 @@ export function MindmapCanvas({
       origX: translate.x,
       origY: translate.y,
     };
+    setDragging(true);
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
   }, [translate.x, translate.y]);
 
@@ -257,6 +262,7 @@ export function MindmapCanvas({
   const endDrag = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     if (!dragState.current.active) return;
     dragState.current.active = false;
+    setDragging(false);
     try {
       (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
     } catch {
@@ -298,7 +304,7 @@ export function MindmapCanvas({
         backgroundImage:
           'radial-gradient(rgba(255,255,255,0.07) 1px, transparent 1px)',
         backgroundSize: '22px 22px',
-        cursor: dragState.current.active ? 'grabbing' : 'grab',
+        cursor: dragging ? 'grabbing' : 'grab',
       }}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
@@ -314,7 +320,7 @@ export function MindmapCanvas({
           width: layout.width,
           height: layout.height,
           transform: `translate(${translate.x}px, ${translate.y}px) scale(${scale})`,
-          transition: dragState.current.active ? 'none' : 'transform 0.12s ease-out',
+          transition: dragging ? 'none' : 'transform 0.12s ease-out',
         }}
       >
         {/* Connectors behind cards */}

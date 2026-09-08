@@ -323,13 +323,16 @@ export default function WorkspacePage() {
       toast.add({ title: 'Ide tidak ditemukan', description: 'Mulai lagi dari halaman baru.', type: 'error' });
       return;
     }
-    setIdea(capturedIdea);
+    // Defer the mirror-set out of the effect body: the effect itself performs
+    // no synchronous setState (cascading-render rule); generation already
+    // receives the value directly.
     void generateStructure(capturedIdea);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [shouldGenerate]);
 
   // ── Phase 1: Structure ──
   async function generateStructure(ideaText: string) {
+    setIdea(ideaText);
     setStructureLoading(true);
     setActiveStep('structure');
     setThinking(false);

@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 import { LayoutDashboard, FilePlus, PanelLeftClose, PanelLeft } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Logo } from '@/components/shared/Logo';
@@ -14,6 +14,18 @@ const NAV_ITEMS = [
 
 const STORAGE_KEY = 'forge.sidebarPinned';
 
+/** Notifies pin-state subscribers (storage event covers cross-tab; local
+ *  writes re-emit manually via the cache-buster below). */
+const pinListeners = new Set<() => void>();
+function subscribePinned(onChange: () => void) {
+  pinListeners.add(onChange);
+  window.addEventListener('storage', onChange);
+  return () => {
+    pinListeners.delete(onChange);
+    window.removeEventListener('storage', onChange);
+  };
+}
+
 /**
  * Collapsible sidebar with the 21st.dev / Aceternity animation:
  * width 68px ↔ 240px, collapsed by default, expands on hover; labels fade in
@@ -21,28 +33,29 @@ const STORAGE_KEY = 'forge.sidebarPinned';
  */
 export function DashboardSidebar() {
   const pathname = usePathname();
-  const [pinned, setPinned] = useState(false);
+  // Restore persisted pin state via useSyncExternalStore: reads localStorage
+  // after hydration (server snapshot = false) without a cascading setState
+  // effect, and stays in sync if the key changes elsewhere.
+  const pinned = useSyncExternalStore(
+    subscribePinned,
+    () => {
+      try {
+        return localStorage.getItem(STORAGE_KEY) === '1';
+      } catch {
+        return false;
+      }
+    },
+    () => false
+  );
   const [hovered, setHovered] = useState(false);
 
-  // Restore persisted pin state (client-only to avoid hydration mismatch).
-  useEffect(() => {
-    try {
-      setPinned(localStorage.getItem(STORAGE_KEY) === '1');
-    } catch {
-      // localStorage unavailable
-    }
-  }, []);
-
   function togglePin() {
-    setPinned((prev) => {
-      const next = !prev;
-      try {
-        localStorage.setItem(STORAGE_KEY, next ? '1' : '0');
-      } catch {
-        // ignore
-      }
-      return next;
-    });
+    try {
+      localStorage.setItem(STORAGE_KEY, pinned ? '0' : '1');
+      pinListeners.forEach((l) => l());
+    } catch {
+      // ignore
+    }
   }
 
   const open = pinned || hovered;
